@@ -1,8 +1,6 @@
-'use strict';
-
-const _ = require('underscore-plus');
 const crypto = require('crypto');
 const path = require('path');
+const { TypeScriptSimple } = require('typescript-simple');
 
 const defaultOptions = {
   target: 1,
@@ -10,51 +8,44 @@ const defaultOptions = {
   sourceMap: true
 };
 
-let TypeScriptSimple = null;
-let typescriptVersionDir = null;
-
-exports.shouldCompile = function() {
-  return true;
-};
-
-exports.getCachePath = function(sourceCode) {
-  if (typescriptVersionDir == null) {
-    const version = require('typescript-simple/package.json').version;
-    typescriptVersionDir = path.join(
-      'ts',
-      createVersionAndOptionsDigest(version, defaultOptions)
-    );
-  }
-
-  return path.join(
-    typescriptVersionDir,
-    crypto
-      .createHash('sha1')
-      .update(sourceCode, 'utf8')
-      .digest('hex') + '.js'
-  );
-};
-
-exports.compile = function(sourceCode, filePath) {
-  if (!TypeScriptSimple) {
-    TypeScriptSimple = require('typescript-simple').TypeScriptSimple;
-  }
-
-  if (process.platform === 'win32') {
-    filePath = 'file:///' + path.resolve(filePath).replace(/\\/g, '/');
-  }
-
-  const options = _.defaults({ filename: filePath }, defaultOptions);
-  return new TypeScriptSimple(options, false).compile(sourceCode, filePath);
-};
+const typescriptVersion = require('typescript-simple/package.json').version;
+const typescriptVersionDir = path.join('ts', createVersionAndOptionsDigest(typescriptVersion, defaultOptions));
 
 function createVersionAndOptionsDigest(version, options) {
-  return crypto
-    .createHash('sha1')
-    .update('typescript', 'utf8')
-    .update('\0', 'utf8')
-    .update(version, 'utf8')
-    .update('\0', 'utf8')
-    .update(JSON.stringify(options), 'utf8')
-    .digest('hex');
+  const hash = crypto.createHash('sha256');
+  hash.update('typescript', 'utf8');
+  hash.update('\0', 'utf8');
+  hash.update(version, 'utf8');
+  hash.update('\0', 'utf8');
+  hash.update(JSON.stringify(options), 'utf8');
+  return hash.digest('hex');
 }
+
+function getCachePath(sourceCode) {
+  if (!sourceCode) throw new Error('Source code is required');
+  
+  const hash = crypto.createHash('sha256').update(sourceCode, 'utf8').digest('hex');
+  return path.join(typescriptVersionDir, `${hash}.js`);
+}
+
+function formatFilePathForPlatform(filePath) {
+  if (process.platform === 'win32') {
+    return `file:///${path.resolve(filePath).replace(/\\/g, '/')}`;
+  }
+  return filePath;
+}
+
+function compile(sourceCode, filePath) {
+  if (!sourceCode || !filePath) throw new Error('Source code and file path are required');
+
+  const formattedFilePath = formatFilePathForPlatform(filePath);
+  const options = { filename: formattedFilePath, ...defaultOptions };
+  const compiler = new TypeScriptSimple(options, false);
+  return compiler.compile(sourceCode, formattedFilePath);
+}
+
+module.exports = {
+  shouldCompile: () => true,
+  getCachePath,
+  compile
+};
